@@ -11,6 +11,7 @@
 ## OnePlus 开源地址
 
 [![OnePlus Repository](https://img.shields.io/badge/OnePlus-Repository-red)](https://github.com/Xiaomichael/kernel_manifest)
+Tips: 最近上游内核源码可能会出现刷入不开机的情况，请仔细辨别
 
 ## 设备支持
 
@@ -22,7 +23,7 @@
 
 支持 ``ReSukiSU`` ``SukiSU Ultra`` ``KernelSU Next`` ``KernelSU Official``, 当然你也可以编译仅加入优化的 ``无 Root`` 内核
 
-tips: SukiSU 由于长期不更新 编译时容易报错且稳定性较差 已经不推荐使用 建议使用ReSukiSU
+Tips: SukiSU 由于长期不更新 编译时容易报错且稳定性较差 已经不推荐使用 建议使用ReSukiSU
 
 ## 使用指南
 
@@ -44,17 +45,17 @@ tips: SukiSU 由于长期不更新 编译时容易报错且稳定性较差 已�
 
 ### ③ 配置开关建议 & 内核特性
 
-- **SUSFS选项**：SUSFS在编译时已经改为可选，看你的需求进行开关。近期上游在拉💩💩💩, 建议关闭
-- **KPM选项**：仅在 ``SukiSU Ultra`` ``ReSukiSU`` 支持开启，建议禁用以减少电量消耗，挂🐕去④
-- **lz4kd**：
+- **SUSFS选项**: SUSFS在编译时已经改为可选，看你的需求进行开关。近期上游在拉💩💩💩, 建议关闭
+- **KPM选项**: 仅在 ``SukiSU Ultra`` 支持开启，建议禁用以减少电量消耗，挂🐕去④
+- **lz4kd**: 
   - ``6.1系``内核：建议关闭该选项以获得更好的 `lz4 + zstd` 压缩方式
   - ``6.6系``内核：建议关闭该选项以获得更好的 `lz4` 压缩方式
   - ``5.10 - 5.15系``内核：建议保持开启
-- **BBR算法**：对手机日用无太大意义甚至可能``负优化``，推荐关闭
+- **BBR算法**: 对手机日用无太大意义甚至可能``负优化``，推荐关闭
 - **BBG基带守护**: 推荐开启，看名字就知道是干啥的
 - **⚠️代理优化**: 骁龙芯片可以开，联发科芯片 `千万不要开` ，否则出现恶性Bug！
 - **是否添加Unicode零宽绕过修复补丁**: 仅推荐内核KMI版本为``android12-5.10``开启, ``5.15 - 6.12``可以使用 [这个 LSPosed 模块](https://t.me/real5ec1cff/271) 无痛修复
 
 ### ④ 作者碎碎念
 
-- **关于元模块**: 推荐 [magic_mount-rs](https://github.com/Tools-cx-app/meta-magic_mount-rs/releases)
+- **关于元模块**: 推荐[Magic Mount - rs](https://github.com/Tools-cx-app/meta-magic_mount-rs/releases)

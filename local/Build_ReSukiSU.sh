@@ -23,7 +23,6 @@ FEIL=$(ask "请输入手机型号 (例如: oneplus_13_b, oneplus_12_b, oneplus_1
 ANDROID_VERSION=$(ask "请输入内核安卓 KMI 版本 (android15, android14, android13, android12)" "android14")
 KERNEL_VERSION=$(ask "请输入内核版本 (6.6, 6.1, 5.15, 5.10)" "6.1")
 SUSFS=$(ask "是否启用 SUSFS? (On/Off)" "Off")
-KPM=$(ask "是否启用 KPM (Kernel Patch Manager)? (On/Off)" "Off")
 lz4kd=$(ask "是否启用 lz4kd? (6.1 关闭时使用 lz4 + zstd; 6.6 关闭时使用 lz4) (On/Off)" "Off")
 bbr=$(ask "是否启用 BBR 拥塞控制算法? (On/Off)" "Off")
 bbg=$(ask "是否启用 Baseband-Guard 基带防护? (On/Off)" "On")
@@ -40,7 +39,6 @@ echo "CPU 分支                 : $CPU"
 echo "安卓 KMI 版本            : $ANDROID_VERSION"
 echo "内核版本                 : $KERNEL_VERSION"
 echo "是否启用 SUSFS           : $SUSFS"
-echo "是否启用 KPM             : $KPM"
 echo "是否启用 lz4kd           : $lz4kd"
 echo "是否启用 BBR             : $bbr"
 echo "是否启用 Baseband-Guard  : $bbg"
@@ -290,8 +288,6 @@ echo "⚡ 添加对 Mountify 的支持"
 echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG_PATH"
 echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG_PATH"
 
-if [ "$KPM" = "On" ]; then echo "CONFIG_KPM=y" >> "$DEFCONFIG_PATH"; fi
-
 if [ "$bbg" = "On" ] && [ "$KPM" = "Off" ]; then
   echo "⚡ 配置 BBG 中..."
   cat <<EOT >> "$DEFCONFIG_PATH"
@@ -411,18 +407,6 @@ if [ -z "$IMAGE_PATH" ]; then echo "❌ 严重错误：编译完成后未找到 
 
 echo "✅ 已找到 Kernel Image: $IMAGE_PATH"
 cp "$IMAGE_PATH" ./AnyKernel3/Image
-
-if [ "$KPM" = 'On' ]; then
-    echo "🧩 正在对内核 Image 应用 KPM 补丁..."
-    mkdir -p kpm_patch_temp && cd kpm_patch_temp
-    curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.13.0/patch_linux
-    chmod +x patch_linux
-    cp "$WORKSPACE/AnyKernel3/Image" ./Image
-    ./patch_linux
-    mv oImage "$WORKSPACE/AnyKernel3/Image"
-    cd .. && rm -rf kpm_patch_temp
-    echo "✅ KPM 补丁应用完成"
-fi
 
 if [ "$lz4kd" = "On" ]; then
   ARTIFACT_NAME="${FEIL}_ReSukiSU_lz4kd_${KSUVER}"
