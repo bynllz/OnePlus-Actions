@@ -2,6 +2,8 @@
 #export all_proxy=socks5://192.168.x.x:x/
 set -e
 
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
 clear
 echo "============================================="
 echo "     OnePlus Kernel Build Configuration      "
@@ -27,6 +29,7 @@ bbr=$(ask "是否启用 BBR 拥塞控制算法? (On/Off)" "Off")
 bbg=$(ask "是否启用 Baseband-Guard 基带防护? (On/Off)" "On")
 proxy=$(ask "是否添加代理性能优化? (如为联发科 CPU 必须选择 Off) (On/Off)" "On")
 UNICODE_BYPASS=$(ask "是否添加Unicode零宽绕过修复补丁(高内核版本不推荐开启, 建议使用 https://t.me/real5ec1cff/271 无痛修复) (On/Off)" "Off")
+CVE_2026_43499=$(ask "是否应用 CVE-2026-43499 rtmutex 修复补丁? (On/Off)" "Off")
 
 clear
 echo ""
@@ -42,6 +45,7 @@ echo "是否启用 BBR             : $bbr"
 echo "是否启用 Baseband-Guard  : $bbg"
 echo "是否启用代理优化          : $proxy"
 echo "是否启用 Unicode 绕过修复 : $UNICODE_BYPASS"
+echo "是否应用 CVE-2026-43499 : $CVE_2026_43499"
 echo "================================================="
 read -p "按回车键开始构建流程..."
 clear
@@ -162,6 +166,13 @@ fi
 
 echo "🔧 正在应用补丁..."
 cd ./common
+
+if [ "$CVE_2026_43499" = "On" ]; then
+  echo "🛡️ 正在应用 CVE-2026-43499 rtmutex 修复补丁..."
+  bash "$REPO_ROOT/security_patch/apply_cve_2026_43499.sh" "$KERNEL_VERSION" "$REPO_ROOT/security_patch"
+else
+  echo "ℹ️ 跳过 CVE-2026-43499 rtmutex 修复补丁"
+fi
 
 if [ "$UNICODE_BYPASS" = "On" ]; then
   echo "📦 正在应用Unicode零宽绕过修复补丁..."

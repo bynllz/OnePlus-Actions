@@ -2,6 +2,8 @@
 #export all_proxy=socks5://192.168.x.x:x/
 set -e
 
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
 clear
 echo "==============================================="
 echo "  ReSukiSU OnePlus Kernel Build Configuration  "
@@ -28,6 +30,7 @@ bbr=$(ask "是否启用 BBR 拥塞控制算法? (On/Off)" "Off")
 bbg=$(ask "是否启用 Baseband-Guard 基带防护? (On/Off)" "On")
 proxy=$(ask "是否添加代理性能优化? (如为联发科 CPU 必须选择 Off) (On/Off)" "On")
 UNICODE_BYPASS=$(ask "是否添加Unicode零宽绕过修复补丁(高内核版本不推荐开启, 建议使用 https://t.me/real5ec1cff/271 无痛修复) (On/Off)" "Off")
+CVE_2026_43499=$(ask "是否应用 CVE-2026-43499 rtmutex 修复补丁? (On/Off)" "Off")
 
 clear
 echo ""
@@ -44,6 +47,7 @@ echo "是否启用 BBR             : $bbr"
 echo "是否启用 Baseband-Guard  : $bbg"
 echo "是否启用代理优化          : $proxy"
 echo "是否启用 Unicode 绕过修复 : $UNICODE_BYPASS"
+echo "是否应用 CVE-2026-43499 : $CVE_2026_43499"
 echo "================================================="
 read -p "按回车键开始构建流程..."
 clear
@@ -193,16 +197,121 @@ fi
 echo "🔧 正在应用补丁..."
 cd ./common
 
+if [ "$CVE_2026_43499" = "On" ]; then
+  echo "🛡️ 正在应用 CVE-2026-43499 rtmutex 修复补丁..."
+  bash "$REPO_ROOT/security_patch/apply_cve_2026_43499.sh" "$KERNEL_VERSION" "$REPO_ROOT/security_patch"
+else
+  echo "ℹ️ 跳过 CVE-2026-43499 rtmutex 修复补丁"
+fi
+
 if [ "$UNICODE_BYPASS" = "On" ]; then
   echo "📦 正在应用Unicode零宽绕过修复补丁..."
   patch -p1 < unicode_bypass_fix.patch
 fi
 
 if [ "$SUSFS" = "On" ]; then
-    patch -p1 < 50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch || true
+  fake_patched=0
+  fake_patched_expand=0
+  if [ "${ANDROID_VERSION}" = "android15" ] && [ "${KERNEL_VERSION}" = "6.6" ]; then
+    if ! grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
+      echo "nr_subpages Line not found. Fake Patching!"
+      sed -i -e '/int ret = 0, copied = 0;/a \\tunsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;' -e '/int ret = 0, copied = 0;/a \\tpagemap_entry_t \*res = NULL;' ./fs/proc/task_mmu.c
+      fake_patched=1
+    fi
+              
+    if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
+      echo "#include <linux/dma-buf.h> Line not found. Adding missing header"
+      sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+    fi
+              
+    if ! grep -qxF '#include <linux/zswap.h>' ./mm/memory.c; then
+      echo "#include <linux/zswap.h> Line not found. Adding missing header"
+      sed -i '/#include <linux\/sched\/sysctl.h>/a #include <linux\/zswap.h>' ./mm/memory.c
+    fi
+              
+    if grep -qF 'if (vma->vm_end > last_vma_end)' ./fs/proc/task_mmu.c && ! grep -qxF 'SUSFS_IS_INODE_SUS_MAP' ./fs/proc/task_mmu.c; then
+      echo "Temporarily expand the `last_vma_end` `if` block to fix a matching issue."
+      perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\)\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);/\t\t\tif (vma->vm_end > last_vma_end) {\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t}/' ./fs/proc/task_mmu.c
+      fake_patched_expand=1
+    fi
+  fi
+  if [ "${ANDROID_VERSION}" = "android12" ] && [ "${KERNEL_VERSION}" = "5.10" ]; then
+    if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
+      echo "vma_pages Line not found. Fake Patching!"
+      fake_patched=1
+    fi
+  fi
+  if [ "${ANDROID_VERSION}" = "android13" ] && [ "${KERNEL_VERSION}" = "5.15" ]; then
+    if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
+      echo "vma_pages Line not found. Fake Patching!"
+      fake_patched=1
+    fi
+              
+    if grep -qxF '#include <linux/swap_slots.h>' ./mm/memory.c; then
+      echo "#include swap_slots.h> Line found. Deleting header."
+      sed -i '/#include <linux\/swap_slots.h>/d' ./mm/memory.c
+      fake_patched=1
+    fi
+  fi
+            
+  if [ "${ANDROID_VERSION}" = "android14" ] && [ "${KERNEL_VERSION}" = "6.1" ]; then
+    if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
+      echo "vma_pages Line not found. Fake Patching!"
+      fake_patched=1
+    fi
+              
+    if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
+      echo "#include <linux/dma-buf.h> Line not found. Adding missing header"
+      sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+    fi
+  fi
+            
+  patch -p1 < 50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch || true
+            
+  # Revert Fake kernel patch
+  if [ "$fake_patched_expand" = 1 ]; then
+    if [ "${ANDROID_VERSION}" = "android15" ] && [ "${KERNEL_VERSION}" = "6.6" ]; then
+      if grep -qF 'if (vma->vm_end > last_vma_end) {' ./fs/proc/task_mmu.c && ! grep -qxF 'SUSFS_IS_INODE_SUS_MAP' ./fs/proc/task_mmu.c; then
+        perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\) \{\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t\}/\t\t\tif (vma->vm_end > last_vma_end)\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);/' ./fs/proc/task_mmu.c
+      fi
+    fi
+  fi
+            
+  if [ "$fake_patched" = 1 ]; then
+    if [ "${ANDROID_VERSION}" = "android15" ] && [ "${KERNEL_VERSION}" = "6.6" ]; then
+      if grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
+        echo "nr_subpages Line found. Revert Fake Patching!"
+        sed -i -e '/unsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;/d' -e '/pagemap_entry_t \*res = NULL;/d' ./fs/proc/task_mmu.c
+      fi
+    fi
+    if [ "${ANDROID_VERSION}" = "android12" ] && [ "${KERNEL_VERSION}" = "5.10" ]; then
+      if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
+        echo "vma_pages Line found. Revert Fake Patching!"
+        sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+      fi
+    fi
+    if [ "${ANDROID_VERSION}" = "android13" ] && [ "${KERNEL_VERSION}" = "5.15" ]; then
+      if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
+        echo "vma_pages Line found. Revert Fake Patching!"
+        sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+      fi
+                
+      if ! grep -qxF '#include <linux/swap_slots.h>' ./mm/memory.c; then
+        echo "#include <linux/swap_slots.h> Line not found. Adding missing header"
+        sed -i '/#include <linux\/vmalloc.h>/a #include <linux\/swap_slots.h>' ./mm/memory.c
+      fi
+    fi
+    if [ "${ANDROID_VERSION}" = "android14" ] && [ "${KERNEL_VERSION}" = "6.1" ]; then
+      if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
+        echo "vma_pages Line found. Revert Fake Patching!"
+        sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+      fi
+    fi
+  fi
+  echo "✅ SUSFS patches applied"
 else
-    echo "📦 应用 MANUAL_HOOK 补丁..."
-    patch -p1 -F 3 < scope_min_manual_hooks_v1.9.patch
+  echo "📦 应用 MANUAL_HOOK 补丁..."
+  patch -p1 -F 3 < scope_min_manual_hooks_v1.9.patch
 fi
 
 if [ "$lz4kd" = "Off" ] && [ "$KERNEL_VERSION" = "6.1" ]; then

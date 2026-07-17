@@ -138,6 +138,24 @@ on:
           - 'On'
           - 'Off'
         default: 'Off'
+
+      CVE_2026_43499:
+        description: "是否应用 CVE-2026-43499 rtmutex 修复补丁"
+        required: true
+        type: choice
+        options:
+          - 'On'
+          - 'Off'
+        default: 'Off'
+
+      BAZEL:
+        description: "是否使用 Bazel 构建"
+        required: true
+        type: choice
+        options:
+          - 'On'
+          - 'Off'
+        default: 'Off'
          
 jobs:
   build:
@@ -160,6 +178,9 @@ jobs:
           remove-android: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
+
+      - name: "📥 Checkout Builder | 检出构建脚本"
+        uses: actions/checkout@v4
 
       - name: "⚙️ Setup Cache Env | 设置缓存环境"
         run: |
@@ -288,6 +309,14 @@ jobs:
           KSU_VERSION=$(expr $(/usr/bin/git rev-list --count main) "+" 30700)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           
+          if [ "${{ github.event.inputs.BAZEL }}" == "On" ]; then
+            KSU_KBUILD="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/KernelSU/kernel/Kbuild"
+            if [[ -f "$KSU_KBUILD" ]]; then
+              sed -i 's|^LOCAL_GIT_EXISTS :=.*|LOCAL_GIT_EXISTS := 1|' "$KSU_KBUILD"
+              echo "✅ 已修复 Bazel 沙箱 git 检测"
+            fi
+          fi
+
           echo "✅ ReSukiSU 配置完成"
           
       - name: "🔧 Setup Patches | 配置补丁"
@@ -296,7 +325,7 @@ jobs:
 
           echo "⬇️ 克隆所需补丁..."
           if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then          
-            git clone https://github.com/cctv18/susfs4oki.git -b oki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}
+            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}
           fi
           git clone https://github.com/Xiaomichael/kernel_patches.git
           git clone https://github.com/ShirkNeko/SukiSU_patch.git
@@ -304,16 +333,15 @@ jobs:
           cd kernel_platform
           echo "📝 复制补丁文件..."
           if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then
-            cp ../susfs4oki/kernel_patches/50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch ./common/
-            cp ../susfs4oki/kernel_patches/fs/* ./common/fs/
-            cp ../susfs4oki/kernel_patches/include/linux/* ./common/include/linux/
+            cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch ./common/
+            cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
+            cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
           else
             cp ../kernel_patches/sukisu/scope_min_manual_hooks_v1.9.patch ./common/
           fi
           cp ../kernel_patches/zram_patches/001-lz4.patch ./common/
           cp ../kernel_patches/zram_patches/lz4armv8.S ./common/lib
           cp ../kernel_patches/zram_patches/002-zstd.patch ./common/
-
           if [ "${{ github.event.inputs.UNICODE_BYPASS }}" = "On" ]; then
             if [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.1" ] || [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.6" ]; then
               cp ../kernel_patches/common/unicode_bypass_fix_6.1+.patch ./common/unicode_bypass_fix.patch
@@ -331,6 +359,13 @@ jobs:
           fi
           
           cd ./common
+
+          if [ "${{ github.event.inputs.CVE_2026_43499 }}" = "On" ]; then
+            echo "🛡️ 正在应用 CVE-2026-43499 rtmutex 修复补丁..."
+            bash "$GITHUB_WORKSPACE/security_patch/apply_cve_2026_43499.sh" "${{ github.event.inputs.KERNEL_VERSION }}" "$GITHUB_WORKSPACE/security_patch"
+          else
+            echo "ℹ️ 跳过 CVE-2026-43499 rtmutex 修复补丁"
+          fi
 
           if [ "${{ github.event.inputs.UNICODE_BYPASS }}" = "On" ]; then
             echo "📦 正在应用Unicode零宽绕过修复补丁..."
@@ -358,7 +393,105 @@ jobs:
 
           if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then
             echo "📦 应用SUSFS补丁..."
+            fake_patched=0
+            fake_patched_expand=0
+            if [ "${{ github.event.inputs.ANDROID_VERSION }}" = "android15" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.6" ]; then
+              if ! grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
+                echo "nr_subpages Line not found. Fake Patching!"
+                sed -i -e '/int ret = 0, copied = 0;/a \\tunsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;' -e '/int ret = 0, copied = 0;/a \\tpagemap_entry_t \*res = NULL;' ./fs/proc/task_mmu.c
+                fake_patched=1
+              fi
+              
+              if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
+                echo "#include <linux/dma-buf.h> Line not found. Adding missing header"
+                sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+              fi
+              
+              if ! grep -qxF '#include <linux/zswap.h>' ./mm/memory.c; then
+                echo "#include <linux/zswap.h> Line not found. Adding missing header"
+                sed -i '/#include <linux\/sched\/sysctl.h>/a #include <linux\/zswap.h>' ./mm/memory.c
+              fi
+              
+              if grep -qF 'if (vma->vm_end > last_vma_end)' ./fs/proc/task_mmu.c && ! grep -qxF 'SUSFS_IS_INODE_SUS_MAP' ./fs/proc/task_mmu.c; then
+                echo "Temporarily expand the `last_vma_end` `if` block to fix a matching issue."
+                perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\)\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);/\t\t\tif (vma->vm_end > last_vma_end) {\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t}/' ./fs/proc/task_mmu.c
+                fake_patched_expand=1
+              fi
+            fi
+            if [ "${{ github.event.inputs.ANDROID_VERSION }}" = "android12" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "5.10" ]; then
+              if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
+                echo "vma_pages Line not found. Fake Patching!"
+                fake_patched=1
+              fi
+            fi
+            if [ "${{ github.event.inputs.ANDROID_VERSION }}" = "android13" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "5.15" ]; then
+              if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
+                echo "vma_pages Line not found. Fake Patching!"
+                fake_patched=1
+              fi
+              
+              if grep -qxF '#include <linux/swap_slots.h>' ./mm/memory.c; then
+                echo "#include swap_slots.h> Line found. Deleting header."
+                sed -i '/#include <linux\/swap_slots.h>/d' ./mm/memory.c
+                fake_patched=1
+              fi
+            fi
+            
+            if [ "${{ github.event.inputs.ANDROID_VERSION }}" = "android14" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.1" ]; then
+              if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
+                echo "vma_pages Line not found. Fake Patching!"
+                fake_patched=1
+              fi
+              
+              if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
+                echo "#include <linux/dma-buf.h> Line not found. Adding missing header"
+                sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+              fi
+            fi
+            
             patch -p1 < 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch || true
+            
+            # Revert Fake kernel patch
+            if [ "$fake_patched_expand" = 1 ]; then
+              if [ "${{ github.event.inputs.ANDROID_VERSION }}" = "android15" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.6" ]; then
+                if grep -qF 'if (vma->vm_end > last_vma_end) {' ./fs/proc/task_mmu.c && ! grep -qxF 'SUSFS_IS_INODE_SUS_MAP' ./fs/proc/task_mmu.c; then
+                  perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\) \{\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t\}/\t\t\tif (vma->vm_end > last_vma_end)\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);/' ./fs/proc/task_mmu.c
+                fi
+              fi
+            fi
+            
+            if [ "$fake_patched" = 1 ]; then
+              if [ "${{ github.event.inputs.ANDROID_VERSION }}" = "android15" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.6" ]; then
+                if grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
+                  echo "nr_subpages Line found. Revert Fake Patching!"
+                  sed -i -e '/unsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;/d' -e '/pagemap_entry_t \*res = NULL;/d' ./fs/proc/task_mmu.c
+                fi
+              fi
+              if [ "${{ github.event.inputs.ANDROID_VERSION }}" = "android12" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "5.10" ]; then
+                if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
+                  echo "vma_pages Line found. Revert Fake Patching!"
+                  sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+                fi
+              fi
+              if [ "${{ github.event.inputs.ANDROID_VERSION }}" = "android13" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "5.15" ]; then
+                if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
+                  echo "vma_pages Line found. Revert Fake Patching!"
+                  sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+                fi
+                
+                if ! grep -qxF '#include <linux/swap_slots.h>' ./mm/memory.c; then
+                  echo "#include <linux/swap_slots.h> Line not found. Adding missing header"
+                  sed -i '/#include <linux\/vmalloc.h>/a #include <linux\/swap_slots.h>' ./mm/memory.c
+                fi
+              fi
+              if [ "${{ github.event.inputs.ANDROID_VERSION }}" = "android14" ] && [ "${{ github.event.inputs.KERNEL_VERSION }}" = "6.1" ]; then
+                if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
+                  echo "vma_pages Line found. Revert Fake Patching!"
+                  sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+                fi
+              fi
+            fi
+            echo "✅ SUSFS patches applied"
           else
             echo "📦 应用MANUAL_HOOK补丁..."
             patch -p1 -F 3 < scope_min_manual_hooks_v1.9.patch
@@ -500,7 +633,8 @@ jobs:
           sed -i 's/check_defconfig//' ./common/build.config.gki
           echo "✅ 内核配置更新完成"
           
-      - name: "🔨 Build Kernel | 编译内核"
+      - name: "🔨 Build Kernel | 编译内核 (Clang)"
+        if: ${{ github.event.inputs.BAZEL == 'Off' }}
         run: |
           echo "🏗️ 开始内核编译..."
           export KBUILD_BUILD_USER="xiaoxiaow"
@@ -539,22 +673,48 @@ jobs:
           
           ccache -s
           echo "✅ 内核编译完成"
-          
+
+      - name: "🔨 Build Kernel | 编译内核 (Bazel)"
+        if: ${{ github.event.inputs.BAZEL == 'On' }}
+        run: |
+          echo "🏗️ 开始内核编译 (Bazel)..."
+          export KBUILD_BUILD_USER="xiaoxiaow"
+          export KBUILD_BUILD_HOST="xiaoxiaow_build"
+
+          cd kernel_workspace
+          if [ "${{ github.event.inputs.KERNEL_VERSION }}" == "6.1" ]; then
+            ./kernel_platform/build_with_bazel.py -t pineapple gki
+          else
+            echo "⚠️ Bazel 构建仅支持6.1版本，当前版本为${{ github.event.inputs.KERNEL_VERSION }}，请使用 Clang 构建。"
+          fi
+
+          echo "✅ 内核编译完成"
+
       - name: "📦 Package Kernel | 打包内核"
         run: |
           echo "📦 准备AnyKernel3打包环境..."
           git clone https://github.com/Xiaomichael/AnyKernel3 --depth=1
           rm -rf ./AnyKernel3/.git
           mkdir -p kernel_workspace/kernel_platform/out/Final-Image-Find/
-          dir1=""
-          dir2=""
-          image_path=$(find "./kernel_workspace/kernel_platform/common/out/" -name "Image" | head -n 1)
-          if [ -n "$image_path" ]; then
-            dir1=$(dirname "$image_path")/
-            echo "✅ 成功找到 Image 文件"
+          image_path=""
+          if [ -d "./kernel_workspace/kernel_platform/common/out/" ]; then
+            image_path=$(find "./kernel_workspace/kernel_platform/common/out/" -name "Image" | head -n 1)
+            if [ -n "$image_path" ]; then
+              echo "✅ 使用 make 编译的统一路径，成功找到 Image 文件"
+            fi
           fi
-          if [ -n "$image_path" ] && [ -f "$image_path" ]; then
-            echo "Image file finally located at: $image_path"
+          if [ -z "$image_path" ] && [ -d "./kernel_workspace/kernel_platform/out/" ]; then
+            image_path=$(find "./kernel_workspace/kernel_platform/out/" -name "Image" | head -n 1)
+            if [ -n "$image_path" ]; then
+              echo "✅ 使用官方脚本编译，成功找到 Image 文件"
+            fi
+          fi
+          if [ -z "$image_path" ]; then
+            echo "❌ 未找到 Image 文件，构建失败" >&2
+            exit 1
+          fi
+          if [ -f "$image_path" ]; then
+            echo "✅ Image file finally located at: $image_path"
             cp "$image_path" ./AnyKernel3/Image
             cp "$image_path" kernel_workspace/kernel_platform/out/Final-Image-Find/Image
           fi
