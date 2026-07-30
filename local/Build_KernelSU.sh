@@ -159,16 +159,16 @@ cd ../..
 
 echo "🔧 正在克隆所需补丁..."
 if [ "$SUSFS" == "On" ]; then
-  git clone https://github.com/cctv18/susfs4oki.git -b oki-${ANDROID_VERSION}-${KERNEL_VERSION}
+  git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${ANDROID_VERSION}-${KERNEL_VERSION}
 fi
 git clone https://github.com/Xiaomichael/kernel_patches.git
 git clone https://github.com/ShirkNeko/SukiSU_patch.git
 
 cd kernel_platform
 echo "📝 正在复制补丁文件..."
-  cp ../susfs4oki/kernel_patches/50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch ./common/
-  cp ../susfs4oki/kernel_patches/fs/* ./common/fs/
-  cp ../susfs4oki/kernel_patches/include/linux/* ./common/include/linux/
+  cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch ./common/
+  cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
+  cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
 fi
 
 cp ../kernel_patches/zram_patches/001-lz4.patch ./common/

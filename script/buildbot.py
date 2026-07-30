@@ -32,7 +32,6 @@ BBR: {BBR}
 Please Join Our Group! tg @gki_kernels_xiaoxiaow
 """.strip()
 
-
 def get_caption():
     msg = MSG_TEMPLATE.format(
         device=DEVICE,
