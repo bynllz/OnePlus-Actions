@@ -478,6 +478,9 @@ cd ../..
 echo "🔨 开始内核编译..."
 cd "$WORKSPACE/kernel_workspace/kernel_platform/common"
 
+# ./kernel_platform/build_with_bazel.py -t pineapple gki
+# bazel
+
 MAKE_CMD_COMMON="make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=\"ccache clang\" RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole LD=ld.lld HOSTLD=ld.lld O=out gki_defconfig all"
 
 export KBUILD_BUILD_USER="xiaoxiaow"
